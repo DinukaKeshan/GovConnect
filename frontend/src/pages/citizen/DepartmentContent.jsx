@@ -2,8 +2,6 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 const getPriorityStyle = (priority) => {
   const map = {
     HIGH:   { dot: "bg-red-500",    pill: "bg-red-50 text-red-700 border-red-200" },
@@ -36,8 +34,6 @@ const getUrgencyColor = (score) => {
   return "bg-green-500";
 };
 
-// ── Urgency Bar ───────────────────────────────────────────────────────────────
-
 const UrgencyBar = ({ score }) => {
   const pct = Math.round((score ?? 0) * 100);
   return (
@@ -53,15 +49,13 @@ const UrgencyBar = ({ score }) => {
   );
 };
 
-// ── Main Component ────────────────────────────────────────────────────────────
-
 const DepartmentContent = () => {
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState("");
   const [votingId, setVotingId]     = useState(null);
   const [votedIds, setVotedIds]     = useState(new Set());
-  const [weights, setWeights]       = useState(null); // scoring weights from ML
+  const [weights, setWeights]       = useState(null);
   const { departmentId }            = useParams();
   const navigate                    = useNavigate();
 
@@ -78,7 +72,6 @@ const DepartmentContent = () => {
 
         const data = response.data;
 
-        // Backend returns flat array (already sorted by ML)
         if (Array.isArray(data)) {
           setComplaints(data);
         } else if (Array.isArray(data.scored)) {
@@ -132,9 +125,7 @@ const DepartmentContent = () => {
   };
 
   const deptName = complaints[0]?.department?.name ?? "Department";
-
-  // Scoring weights — use from API or fallback to defaults
-  const scoringWeights = weights ?? { votes: 0.50, priority: 0.35, recency: 0.15 };
+  const scoringWeights = weights ?? { votes: 0.60, priority: 0.40 };
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10">
@@ -179,8 +170,8 @@ const DepartmentContent = () => {
               </div>
             </div>
 
-            {/* Scoring weights */}
-            <div className="grid grid-cols-3 gap-2">
+            {/* Scoring weights — 2 cols */}
+            <div className="grid grid-cols-2 gap-2">
               {Object.entries(scoringWeights).map(([key, val]) => (
                 <div key={key} className="bg-white rounded-lg px-2 py-1.5 text-center border border-blue-100">
                   <div className="text-xs font-bold text-blue-700">{Math.round(val * 100)}%</div>
@@ -270,7 +261,6 @@ const DepartmentContent = () => {
                     {/* Footer */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        {/* Vote button */}
                         <button
                           onClick={() => handleVote(complaint._id)}
                           disabled={hasVoted || isVoting}
@@ -293,13 +283,11 @@ const DepartmentContent = () => {
                           {voteCount} {hasVoted ? "Voted" : "Vote"}
                         </button>
 
-                        {/* Status badge */}
                         <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${statusStyle}`}>
                           {status.replace("_", " ").charAt(0) + status.replace("_", " ").slice(1).toLowerCase()}
                         </span>
                       </div>
 
-                      {/* Score */}
                       <span className="text-xs text-slate-300 tabular-nums">
                         score: {urgencyScore.toFixed(3)}
                       </span>

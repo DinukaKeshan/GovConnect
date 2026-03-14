@@ -20,13 +20,22 @@ def score():
         if not complaints:
             return jsonify({"error": "No complaints provided"}), 400
 
+        if len(complaints) == 1:
+            scored = [{**complaints[0], "_urgencyScore": 0.5, "_rank": 1}]
+            return jsonify({
+                "scored": scored,
+                "model_info": {
+                    "weights": {"votes": 0.60, "priority": 0.40},
+                    "n_complaints": 1,
+                }
+            })
+
         scores = compute_scores(complaints)
 
         scored = []
         for complaint, s in zip(complaints, scores):
             scored.append({**complaint, "_urgencyScore": round(float(s), 4)})
 
-        # Sort by urgency score descending
         scored.sort(key=lambda c: c["_urgencyScore"], reverse=True)
 
         for i, c in enumerate(scored):
@@ -38,7 +47,7 @@ def score():
         return jsonify({
             "scored": scored,
             "model_info": {
-                "weights": {"votes": 0.50, "priority": 0.35, "recency": 0.15},
+                "weights": {"votes": 0.60, "priority": 0.40},
                 "n_complaints": len(scored),
             }
         })

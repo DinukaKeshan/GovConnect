@@ -6,12 +6,10 @@ const ML_URL = "http://localhost:5001";
 export const mlScoreAndSort = async (complaints) => {
   if (!complaints || complaints.length === 0) return [];
 
-  // Single complaint — no sorting needed
   if (complaints.length === 1) {
     return [{ ...complaints[0].toObject?.() ?? complaints[0], _urgencyScore: 0.5, _rank: 1 }];
   }
 
-  // Convert Mongoose docs to plain objects
   const plain = complaints.map(c => c.toObject?.() ?? c);
 
   try {
@@ -30,19 +28,19 @@ export const mlScoreAndSort = async (complaints) => {
   }
 };
 
-// JS fallback if Python service is down
 const jsFallbackSort = (complaints) => {
   const PRIORITY_SCORE = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
-  return complaints
-    .map(c => ({
-      ...c,
-      _urgencyScore: (
-        (c.votes?.length ?? 0) * 0.50 +
-        (PRIORITY_SCORE[c.priority] ?? 2) * 0.35
-      ),
-      _rank: 0,
-    }))
-    .sort((a, b) => b._urgencyScore - a._urgencyScore)
-    .map((c, i) => ({ ...c, _rank: i + 1 }));
+  const scored = complaints.map(c => ({
+    ...c,
+    _urgencyScore: (
+      (c.votes?.length ?? 0) * 0.60 +
+      (PRIORITY_SCORE[c.priority] ?? 2) * 0.40
+    ),
+    _rank: 0,
+  }));
+
+  scored.sort((a, b) => b._urgencyScore - a._urgencyScore);
+
+  return scored.map((c, i) => ({ ...c, _rank: i + 1 }));
 };
