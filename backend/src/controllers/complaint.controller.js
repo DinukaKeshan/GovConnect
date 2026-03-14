@@ -108,22 +108,17 @@ export const getComplaintsByDepartment = async (req, res) => {
   try {
     const complaints = await Complaint.find({ department: departmentId })
       .populate("department", "name")
+      .populate("citizen", "name")
       .exec();
 
-    // 👈 FIXED: Return 200 with an empty list so React can show the "No complaints yet" UI
     if (!complaints || complaints.length === 0) {
-      return res.json({ scored: [], model_info: null });
+      return res.status(404).json({ error: "No complaints found for this department" });
     }
 
-    // Send to Python ML microservice (localhost:5001) for scoring + sorting
-    // Falls back to JS scorer automatically if Python service is down
-    const responseData = await mlScoreAndSort(complaints);
-    
-    // Safely check length whether it returns an array or an object
-    const count = Array.isArray(responseData) ? responseData.length : (responseData.scored?.length || 0);
-    console.log(`[ML] Returned ${count} sorted complaints for department ${departmentId}`);
+    const sorted = await mlScoreAndSort(complaints);
+    console.log(`[Controller] Returning ${sorted.length} sorted complaints`);
 
-    res.json(responseData);
+    res.json(sorted); // ✅ returns flat array, frontend reads it directly
   } catch (error) {
     console.error("Error fetching complaints by department:", error);
     res.status(500).json({ error: "Server error" });

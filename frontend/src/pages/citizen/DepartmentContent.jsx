@@ -2,18 +2,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 
-// ── Configuration ─────────────────────────────────────────────────────────────
-
-// Automatically handles both Create React App (REACT_APP_) and Vite (VITE_) environment variables
-// ── Configuration ─────────────────────────────────────────────────────────────
-
-// Safely handles both Create React App (REACT_APP_) and Vite (VITE_) environment variables
-const API_BASE_URL = 
-  (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL) || 
-  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || 
-  "http://localhost:5000";
-
-// ── Purely data-driven helpers ────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const getPriorityStyle = (priority) => {
   const map = {
@@ -41,14 +30,13 @@ const getRankStyle = (rank) => {
   return "bg-slate-100 text-slate-500";
 };
 
-// Urgency bar color driven purely by the ML score value
 const getUrgencyColor = (score) => {
   if (score >= 0.7) return "bg-red-500";
   if (score >= 0.4) return "bg-amber-500";
   return "bg-green-500";
 };
 
-// ── Urgency Bar Component ─────────────────────────────────────────────────────
+// ── Urgency Bar ───────────────────────────────────────────────────────────────
 
 const UrgencyBar = ({ score }) => {
   const pct = Math.round((score ?? 0) * 100);
@@ -68,14 +56,14 @@ const UrgencyBar = ({ score }) => {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 const DepartmentContent = () => {
-  const [complaints, setComplaints]   = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState("");
-  const [votingId, setVotingId]       = useState(null);
-  const [votedIds, setVotedIds]       = useState(new Set());
-  const [modelInfo, setModelInfo]     = useState(null); // ML model metadata from backend
-  const { departmentId }              = useParams();
-  const navigate                      = useNavigate();
+  const [complaints, setComplaints] = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState("");
+  const [votingId, setVotingId]     = useState(null);
+  const [votedIds, setVotedIds]     = useState(new Set());
+  const [weights, setWeights]       = useState(null); // scoring weights from ML
+  const { departmentId }            = useParams();
+  const navigate                    = useNavigate();
 
   useEffect(() => {
     const fetchComplaints = async () => {
@@ -84,17 +72,21 @@ const DepartmentContent = () => {
         if (!token) return navigate("/citizen/login");
 
         const response = await axios.get(
-          `${API_BASE_URL}/api/citizen/complaints/department/${departmentId}`,
+          `http://localhost:5000/api/citizen/complaints/department/${departmentId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        // Backend returns array of complaints already sorted by ML urgency score
-        // Each complaint has _urgencyScore and _rank attached by the Python model
         const data = response.data;
-        setComplaints(Array.isArray(data) ? data : data.scored ?? []);
 
-        // If backend returns model_info (feature importances etc), store it
-        if (data.model_info) setModelInfo(data.model_info);
+        // Backend returns flat array (already sorted by ML)
+        if (Array.isArray(data)) {
+          setComplaints(data);
+        } else if (Array.isArray(data.scored)) {
+          setComplaints(data.scored);
+          if (data.model_info?.weights) setWeights(data.model_info.weights);
+        } else {
+          setComplaints([]);
+        }
 
       } catch (err) {
         setError("Failed to fetch complaints for this department.");
@@ -102,6 +94,7 @@ const DepartmentContent = () => {
         setLoading(false);
       }
     };
+
     fetchComplaints();
   }, [departmentId, navigate]);
 
@@ -113,28 +106,18 @@ const DepartmentContent = () => {
     setVotingId(complaintId);
     try {
       const response = await axios.post(
-        `${API_BASE_URL}/api/citizen/complaints/vote`,
+        "http://localhost:5000/api/citizen/complaints/vote",
         { complaintId, voteType: "upvote" },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Update vote count in local state and re-sort
-      setComplaints((prev) => {
-        const updated = prev.map((c) =>
+      setComplaints((prev) =>
+        prev.map((c) =>
           c._id === complaintId
             ? { ...c, votes: response.data.complaint.votes }
             : c
-        );
-
-        // Sort by urgency score first, then by the new vote count
-        return updated.sort((a, b) => {
-          if (b._urgencyScore !== a._urgencyScore) {
-            return (b._urgencyScore || 0) - (a._urgencyScore || 0);
-          }
-          return (b.votes?.length || 0) - (a.votes?.length || 0);
-        });
-      });
-      
+        )
+      );
       setVotedIds((prev) => new Set([...prev, complaintId]));
     } catch (err) {
       const msg = err.response?.data?.error;
@@ -148,11 +131,10 @@ const DepartmentContent = () => {
     }
   };
 
-  // Department name comes from the first complaint's populated department field
   const deptName = complaints[0]?.department?.name ?? "Department";
 
-  // Feature importances come from the ML model — displayed dynamically
-  const importances = modelInfo?.feature_importances ?? null;
+  // Scoring weights — use from API or fallback to defaults
+  const scoringWeights = weights ?? { votes: 0.50, priority: 0.35, recency: 0.15 };
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10">
@@ -170,7 +152,7 @@ const DepartmentContent = () => {
             <div>
               <h1 className="text-2xl font-bold text-slate-800">{deptName}</h1>
               <p className="text-sm text-slate-500 mt-1">
-                Complaints ranked by ML urgency model
+                Complaints ranked by urgency score
               </p>
             </div>
             {complaints.length > 0 && (
@@ -181,10 +163,10 @@ const DepartmentContent = () => {
           </div>
         </div>
 
-        {/* ML Model Info Banner — driven by actual model metadata */}
+        {/* ML Info Banner */}
         {complaints.length > 0 && (
           <div className="mb-6 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-3">
               <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
                 <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -193,25 +175,19 @@ const DepartmentContent = () => {
               </div>
               <div>
                 <p className="text-sm font-semibold text-blue-800">ML Urgency Ranking</p>
-                <p className="text-xs text-blue-500">Random Forest model · sorted highest urgency first</p>
+                <p className="text-xs text-blue-500">Sorted highest urgency first</p>
               </div>
             </div>
 
-            {/* Feature importances — shown only if returned by the model */}
-            {importances ? (
-              <div className="mt-2 grid grid-cols-4 gap-2">
-                {Object.entries(importances).map(([feature, weight]) => (
-                  <div key={feature} className="bg-white rounded-lg px-2 py-1.5 text-center border border-blue-100">
-                    <div className="text-xs font-bold text-blue-700">{Math.round(weight * 100)}%</div>
-                    <div className="text-xs text-slate-500 capitalize">{feature}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-blue-400 mt-1">
-                Factors: priority · votes · recency · status
-              </p>
-            )}
+            {/* Scoring weights */}
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(scoringWeights).map(([key, val]) => (
+                <div key={key} className="bg-white rounded-lg px-2 py-1.5 text-center border border-blue-100">
+                  <div className="text-xs font-bold text-blue-700">{Math.round(val * 100)}%</div>
+                  <div className="text-xs text-slate-500 capitalize">{key}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -245,8 +221,7 @@ const DepartmentContent = () => {
         ) : (
           <div className="space-y-4">
             {complaints.map((complaint, index) => {
-              // All display values derived purely from complaint data — nothing hardcoded
-              const rank          = index + 1; // Updated to dynamic index based on state sorting
+              const rank          = complaint._rank ?? index + 1;
               const urgencyScore  = complaint._urgencyScore ?? 0;
               const priority      = complaint.priority ?? "MEDIUM";
               const status        = complaint.status ?? "PENDING";
@@ -262,7 +237,7 @@ const DepartmentContent = () => {
                   key={complaint._id}
                   className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
                 >
-                  {/* Rank + Urgency bar row */}
+                  {/* Rank + Urgency bar */}
                   <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b border-slate-50">
                     <span className={`text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${rankStyle}`}>
                       #{rank}
@@ -271,13 +246,12 @@ const DepartmentContent = () => {
                     <span className="text-xs text-slate-400 flex-shrink-0">Urgency</span>
                   </div>
 
-                  {/* Complaint body */}
+                  {/* Body */}
                   <div className="px-5 py-4">
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <h3 className="font-semibold text-slate-800 text-base leading-snug">
                         {complaint.title}
                       </h3>
-                      {/* Priority pill */}
                       <span className={`text-xs px-2 py-0.5 rounded-full border font-medium flex-shrink-0 flex items-center gap-1 ${priorityStyle.pill}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${priorityStyle.dot}`} />
                         {priority.charAt(0) + priority.slice(1).toLowerCase()}
@@ -293,7 +267,7 @@ const DepartmentContent = () => {
                       {complaint.description}
                     </p>
 
-                    {/* Footer row */}
+                    {/* Footer */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {/* Vote button */}
@@ -325,7 +299,7 @@ const DepartmentContent = () => {
                         </span>
                       </div>
 
-                      {/* ML score */}
+                      {/* Score */}
                       <span className="text-xs text-slate-300 tabular-nums">
                         score: {urgencyScore.toFixed(3)}
                       </span>
@@ -336,6 +310,7 @@ const DepartmentContent = () => {
             })}
           </div>
         )}
+
       </div>
     </div>
   );
